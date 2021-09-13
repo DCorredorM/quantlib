@@ -7,28 +7,28 @@ class Binomial_Model(nx.DiGraph):
 	"""docstring for Binomial_Model"""
 	# TODO: Make it depend of a general payoff function!
 
-	def __init__(self, S0, u, d, T, delta, K, r):
+	def __init__(self, spot_price, up_factor, down_factor, maturity, time_delta, strike_price, risk_free_rate):
 		super(Binomial_Model, self).__init__()
-		self.S0 = S0
-		self.u = u
-		self.d = d
-		self.T = T
-		self.delta = delta
-		self.K = K
-		self.r = r
-		self.create_binom_tree()
+		self.spot_price = spot_price
+		self.up_factor = up_factor
+		self.down_factor = down_factor
+		self.maturity = maturity
+		self.time_delta = time_delta
+		self.strike_price = strike_price
+		self.risk_free_rate = risk_free_rate
+		self.create_binomial_tree()
 
-	def create_binom_tree(self):
+	def create_binomial_tree(self):
 		# print("nodes0",len(self.nodes))
 		# self.create_sons(0)
-		self.add_node(0, p=self.S0, per=0, ups=0)
+		self.add_node(0, p=self.spot_price, per=0, ups=0)
 		nt = [0]
-		for t in range(1, self.T + 1):
+		for t in range(1, self.maturity + 1):
 			oldnt = nt
 			nt = []
 			for i in range(0, t + 1):
 				nt += [len(self.nodes)]
-				self.add_node(len(self.nodes), p=self.S0 * self.u ** i * self.d ** (t - i), per=t, ups=i)
+				self.add_node(len(self.nodes), p=self.spot_price * self.up_factor ** i * self.down_factor ** (t - i), per=t, ups=i)
 			for i in nt:
 				for j in oldnt:
 					# print(self.nodes[j]["p"],self.nodes[i]["p"],self.nodes[j]["ups"]-self.nodes[i]["ups"])
@@ -37,14 +37,14 @@ class Binomial_Model(nx.DiGraph):
 						self.add_edge(j, i)
 
 	def create_sons(self, node):
-		if self.nodes[node]["per"] + self.delta <= self.T:
+		if self.nodes[node]["per"] + self.time_delta <= self.maturity:
 			n1 = len(self.nodes)
 
-			self.add_node(n1, p=self.nodes[node]["p"] + self.u, per=self.nodes[node]["per"] + self.delta)
+			self.add_node(n1, p=self.nodes[node]["p"] + self.up_factor, per=self.nodes[node]["per"] + self.time_delta)
 			self.create_sons(n1)
 
 			n2 = len(self.nodes)
-			self.add_node(n2, p=self.nodes[node]["p"] - self.d, per=self.nodes[node]["per"] + self.delta)
+			self.add_node(n2, p=self.nodes[node]["p"] - self.down_factor, per=self.nodes[node]["per"] + self.time_delta)
 			self.create_sons(n2)
 
 	def plot_price_tree(self):
@@ -56,12 +56,12 @@ class Binomial_Model(nx.DiGraph):
 		plt.show()
 
 	def calc_val_RP(self):
-		pi = (1 + self.r - self.d) / (self.u - self.d)
-		for t in list(range(self.T + 1))[::-1]:
+		pi = (1 + self.risk_free_rate - self.down_factor) / (self.up_factor - self.down_factor)
+		for t in list(range(self.maturity + 1))[::-1]:
 			for i in self.nodes():
 				if self.nodes[i]["per"] == t:
-					if t == self.T:
-						self.nodes[i]["val"] = max(0, self.nodes[i]["p"] - self.K)
+					if t == self.maturity:
+						self.nodes[i]["val"] = max(0, self.nodes[i]["p"] - self.strike_price)
 						self.nodes[i]["delta"] = 0
 					else:
 						cu = max(self.nodes[k]["val"] for k in self.successors(i))
@@ -73,14 +73,14 @@ class Binomial_Model(nx.DiGraph):
 		return self.nodes[0]["val"]
 
 	def calc_val_Port(self):
-		pi = (1 + self.r - self.d) / (self.u - self.d)
+		pi = (1 + self.risk_free_rate - self.down_factor) / (self.up_factor - self.down_factor)
 		print(pi)
 		print(1 - pi)
-		for t in list(range(self.T + 1))[::-1]:
+		for t in list(range(self.maturity + 1))[::-1]:
 			for i in self.nodes():
 				if self.nodes[i]["per"] == t:
-					if t == self.T:
-						self.nodes[i]["val"] = max(0, self.nodes[i]["p"] - self.K)
+					if t == self.maturity:
+						self.nodes[i]["val"] = max(0, self.nodes[i]["p"] - self.strike_price)
 						self.nodes[i]["delta"] = 0
 					else:
 						cu = max(self.nodes[k]["val"] for k in self.successors(i))
@@ -88,7 +88,7 @@ class Binomial_Model(nx.DiGraph):
 						su = max(self.nodes[k]["p"] for k in self.successors(i))
 						sd = min(self.nodes[k]["p"] for k in self.successors(i))
 						self.nodes[i]["delta"] = (cu - cd) / (su - sd)
-						self.nodes[i]["beta"] = (su * cd - sd * cu) / ((1 + self.r) * (su - sd))
+						self.nodes[i]["beta"] = (su * cd - sd * cu) / ((1 + self.risk_free_rate) * (su - sd))
 						self.nodes[i]["val"] = self.nodes[i]["p"] * self.nodes[i]["delta"] + self.nodes[i]["beta"]
 		return self.nodes[0]["val"]
 
