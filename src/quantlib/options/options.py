@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Callable
+from typing import Callable, Union
+
+from datetime import datetime
 
 
 class OptionTypes:
@@ -13,14 +15,25 @@ class OptionTypes:
 
 
 class OptionContract(ABC):
-	def __init__(self,
-	             underlying_price: float,
-	             strike_price: float,
-	             maturity: int):
+	"""
+	Attributes
+	__________
 
-		self.underlying_price = underlying_price
+	strike_price
+	maturity
+	underlying_ticker
+	valuation_model
+	type
+	theoretical_price
+	"""
+	def __init__(self,
+	             strike_price: float,
+	             maturity: Union[int, datetime],
+	             underlying_ticker: str = None):
+
 		self.strike_price = strike_price
 		self.maturity = maturity
+		self.underlying_ticker = underlying_ticker
 
 		self.valuation_model = None
 		self.type = None
@@ -33,14 +46,29 @@ class OptionContract(ABC):
 	def add_valuation_model(self, valuation_model):
 		self.valuation_model = valuation_model(self)
 
+	def get_time_until_expiration(self, date=None, units='days'):
+		if isinstance(self.maturity, datetime):
+			if date is None:
+				date = datetime.now()
+
+			td = (self.maturity - date).days
+
+			if units == 'months':
+				td /= 30
+			elif units == 'years':
+				td /= 360
+			return td
+		else:
+			return self.maturity
+
 
 class CallOption(OptionContract):
 	def __init__(self,
-	             underlying_price: float,
 	             strike_price: float,
-	             maturity: int):
+	             maturity: int,
+	             underlying_ticker: str = None):
 
-		super().__init__(underlying_price, strike_price, maturity)
+		super().__init__(strike_price, maturity, underlying_ticker)
 		self.type = OptionTypes.call
 
 	def payoff(self, underlying_price):
@@ -49,10 +77,10 @@ class CallOption(OptionContract):
 
 class PutOption(OptionContract):
 	def __init__(self,
-	             underlying_price: float,
 	             strike_price: float,
-	             maturity: int):
-		super(PutOption).__init__(underlying_price, strike_price, maturity)
+	             maturity: int,
+	             underlying_ticker: str = None):
+		super(PutOption).__init__(strike_price, maturity, underlying_ticker)
 		self.type = OptionTypes.put
 
 	def payoff(self, underlying_price):
@@ -77,12 +105,12 @@ class ExoticOption(OptionContract):
 	payoff_function
 	"""
 	def __init__(self,
-	             underlying_price: float,
 	             strike_price: float,
 	             maturity: int,
-	             payoff_function: Callable):
+	             payoff_function: Callable,
+	             underlying_ticker: str = None):
 
-		super().__init__(underlying_price, strike_price, maturity)
+		super().__init__(strike_price, maturity, underlying_ticker)
 		self.type = OptionTypes.exotic
 		self.payoff_function = payoff_function
 

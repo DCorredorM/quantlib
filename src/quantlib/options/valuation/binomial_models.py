@@ -1,34 +1,40 @@
 import networkx as nx
-import pydot
-from networkx.drawing.nx_pydot import graphviz_layout
+
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import overload
 
 from quantlib.options.options import OptionContract, OptionTypes
+from quantlib.data_handler.source import Data, RiskFreeRateScraper
+from quantlib.volatility import *
+from utils.miscellaneous import to_date
+
 from .valuation_abstract import ValuationModel
 from utils.miscellaneous import color_map
+import pandas as pd
+from datetime import date
 
 
 class BinomialModel(nx.DiGraph, ValuationModel):
     """docstring for Binomial_Model"""
-    # TODO: Make it depend of a general payoff function!
+
     def __init__(self,
                  option_contract: OptionContract,
+                 underlying_price: float,
                  up_factor: float,
                  down_factor: float,
-                 time_delta: float,
+                 number_of_steps: int,
                  risk_free_rate: float,
                  **kwargs):
         super().__init__(**kwargs)
+        self.built_from_tree = False
         self.option_contract = option_contract
-        self.underlying_price = option_contract.underlying_price
+        self.underlying_price = underlying_price
         self.strike_price = option_contract.strike_price
         self.maturity = option_contract.maturity
 
         self.up_factor = up_factor
         self.down_factor = down_factor
-        self.time_delta = time_delta
+        self.number_of_steps = number_of_steps
         self.risk_free_rate = risk_free_rate
         self.risk_neutral_probability = (1 + self.risk_free_rate - self.down_factor) / \
                                         (self.up_factor - self.down_factor)
@@ -66,12 +72,56 @@ class BinomialModel(nx.DiGraph, ValuationModel):
         # Fills the rest of the needed arguments.
         obj.option_contract = option_contract
         obj.maturity = option_contract.maturity
-        obj.underlying_price = option_contract.underlying_price
         obj.strike_price = option_contract.strike_price
         obj.risk_free_rate = risk_free_rate
         obj.visualizer = BinomialTreeVisualizer(obj)
-        obj.from_tree = True
+        obj.built_from_tree = True
         obj.root = [i for i in obj.nodes if obj.nodes[i]["period"] == 0][0]
+        obj.underlying_price = obj.nodes[obj.root]['price']
+        obj.number_of_steps = max([obj.nodes[n]["period"] for n in obj])
+        return obj
+
+    @classmethod
+    def from_data(cls,
+                  option_contract: OptionContract,
+                  number_of_steps: int,
+                  volatility_model: VolatilityModel = None,
+                  valuation_date: datetime = None
+                  ):
+        obj = cls.__new__(cls)
+
+        if valuation_date is None:
+            valuation_date = date.today()
+        elif isinstance(valuation_date, datetime.datetime):
+            valuation_date = valuation_date.date()
+        # Collect data for source node
+        data = Data(option_contract.underlying_ticker, end_date=valuation_date, shift=10)
+        valuation_date = min(data.raw_data.index, key=lambda x: abs(valuation_date - to_date(x)))
+
+        maturity = option_contract.get_time_until_expiration(date=valuation_date, units='years')
+
+        if volatility_model is None:
+            # As default uses the implied volatility model
+            volatility_model = ImpliedVolatility(option_contract)
+
+        # Uses the volatility model to estimate the volatility.
+        sigma = volatility_model(valuation_date)
+
+        # Use the BS approximation up and down factors.
+        up_factor = np.exp(sigma * np.sqrt(maturity / number_of_steps))
+        down_factor = 1 / up_factor
+
+        # Get the risk free data with the RiskFreeRateScraper.
+        rf_scraper = RiskFreeRateScraper()
+        risk_free_rate = rf_scraper(maturity=maturity * 12, access_date=valuation_date)
+
+        obj.__init__(option_contract=option_contract,
+                     underlying_price=data.raw_data['close'].loc[valuation_date],
+                     up_factor=up_factor,
+                     down_factor=down_factor,
+                     number_of_steps=number_of_steps,
+                     risk_free_rate=risk_free_rate)
+
         return obj
 
     def create_binomial_tree(self):
@@ -79,12 +129,12 @@ class BinomialModel(nx.DiGraph, ValuationModel):
         self.create_sons((0, 0))
 
     def create_sons(self, node):
-        if self.nodes[node]["period"] + self.time_delta <= self.maturity:
+        if self.nodes[node]["period"] < self.number_of_steps:
             n1 = (node[0] + 1, node[1] + 1)
             if n1 not in self.nodes:
                 self.add_node(n1,
                               price=self.nodes[node]["price"] * self.up_factor,
-                              period=self.nodes[node]["period"] + self.time_delta,
+                              period=self.nodes[node]["period"] + 1,
                               ups=self.nodes[node]["ups"] + 1)
                 self.create_sons(n1)
             self.add_edge(node, n1)
@@ -93,7 +143,7 @@ class BinomialModel(nx.DiGraph, ValuationModel):
             if n2 not in self.nodes:
                 self.add_node(n2,
                               price=self.nodes[node]["price"] * self.down_factor,
-                              period=self.nodes[node]["period"] + self.time_delta,
+                              period=self.nodes[node]["period"] + 1,
                               ups=self.nodes[node]["ups"])
                 self.create_sons(n2)
             self.add_edge(node, n2)
@@ -110,7 +160,7 @@ class BinomialModel(nx.DiGraph, ValuationModel):
         def value(node):
             n = self.nodes[node]
             if 'value' not in n.keys():
-                if np.isclose(n["period"], self.maturity):
+                if n["period"] == self.number_of_steps:
                     n["delta"] = 0
                     n["beta"] = 0
                     n["value"] = self.option_contract.payoff(n['price'])
@@ -122,7 +172,8 @@ class BinomialModel(nx.DiGraph, ValuationModel):
                     su = self.nodes[n_up]['price']
 
                     n["delta"] = (vu - vd) / (su - sd)
-                    n["beta"] = (su * vd - sd * vu) / ((1 + self.risk_free_rate) * (su - sd))
+                    n["beta"] = (su * vd - sd * vu) / \
+                                (np.exp(self.risk_free_rate * self.maturity / self.number_of_steps) * (su - sd))
                     n["value"] = n["price"] * n["delta"] + n["beta"]
             return n["value"]
 
@@ -146,25 +197,46 @@ class BinomialTreeVisualizer:
     def __init__(self, tree: BinomialModel):
         self.tree = tree
 
-    def plot_price_tree(self):
-        fig, ax = plt.subplots(figsize=(16, 12))
-        pos = {i: (self.tree.nodes[i]["period"], self.tree.nodes[i]["price"]) for i in self.tree.nodes()}
-        labels = {i: round(self.tree.nodes[i]["price"], 2) for i in self.tree.nodes()}
+    def price_tree(self):
+        self.sub_price_tree(self.tree.root, self.tree.number_of_steps)
 
-        nx.draw_networkx(self.tree, pos=pos, node_size=1700, node_color="lavender", alpha=0.7, font_size=8, linewidths=1,
+    def value_tree(self):
+        self.sub_value_tree(self.tree.root, self.tree.number_of_steps)
+
+    def sub_price_tree(self, root, height: int):
+        nodes = [n for n in self.tree.nodes if
+                 (self.tree.nodes[n]["period"] - self.tree.nodes[root]["period"] <= height) and
+                 self.tree.nodes[root]["ups"] <= self.tree.nodes[n]["ups"] <=
+                 self.tree.nodes[root]["ups"] + self.tree.nodes[n]["period"] - self.tree.nodes[root]["period"]]
+        edges = [(i, j) for (i, j) in self.tree.edges if i in nodes and j in nodes]
+
+        fig, ax = plt.subplots(figsize=(16, 12))
+        pos = {i: (self.tree.nodes[i]["period"], self.tree.nodes[i]["price"]) for i in nodes}
+        labels = {i: round(self.tree.nodes[i]["price"], 2) for i in nodes}
+
+        nx.draw_networkx(self.tree, pos=pos, nodelist=nodes, edgelist=edges, node_size=1700, node_color="lavender",
+                         alpha=0.7, font_size=8,
+                         linewidths=1,
                          edgecolors="black", labels=labels, ax=ax)
         plt.show()
 
-    def plot_val_tree(self, delta=True):
+    def sub_value_tree(self, root, height: int):
+        nodes = [n for n in self.tree.nodes if
+                 (self.tree.nodes[n]["period"] - self.tree.nodes[root]["period"] <= height) and
+                 self.tree.nodes[root]["ups"] <= self.tree.nodes[n]["ups"] <=
+                 self.tree.nodes[root]["ups"] + self.tree.nodes[n]["period"] - self.tree.nodes[root]["period"]]
+        edges = [(i, j) for (i, j) in self.tree.edges if i in nodes and j in nodes]
+
         self.tree.value_synthetic_asset_portfolio()
         fig, ax = plt.subplots(figsize=(16, 12))
-        pos = {i: (self.tree.nodes[i]["period"], self.tree.nodes[i]["price"]) for i in self.tree.nodes()}
+        pos = {i: (self.tree.nodes[i]["period"], self.tree.nodes[i]["price"]) for i in nodes}
         cmap = color_map(0, max([self.tree.nodes[i]["value"] for i in self.tree.nodes]), True)
-        node_color = [cmap(self.tree.nodes[i]["value"]) for i in self.tree.nodes]
+        node_color = [cmap(self.tree.nodes[i]["value"]) for i in nodes]
 
         labels = {i: 'V: ' + str(round(self.tree.nodes[i]["value"], 2)) + '\n $\Delta: $' + str(
-            round(self.tree.nodes[i]["delta"], 2)) for i in self.tree.nodes()}
-        nx.draw_networkx(self.tree, pos=pos, node_size=1600, node_color=node_color, alpha=0.3, linewidths=1,
+            round(self.tree.nodes[i]["delta"], 2)) for i in nodes}
+        nx.draw_networkx(self.tree, pos=pos, nodelist=nodes, edgelist=edges, node_size=1600, node_color=node_color,
+                         alpha=0.3, linewidths=1,
                          edgecolors="black", node_shape="o", ax=ax, with_labels=False)
         nx.draw_networkx_labels(self.tree, pos, labels, font_size=8)
 
