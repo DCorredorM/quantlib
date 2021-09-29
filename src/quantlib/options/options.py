@@ -8,10 +8,13 @@ from datetime import datetime
 class OptionTypes:
 	call = 0
 	put = 1
-	american_call = 2
-	american_put = 3
-	asian = 4
-	exotic = 5
+	exotic = 2
+
+
+class PayOffType:
+	european = 0
+	american = 1
+	asian = 2
 
 
 class OptionContract(ABC):
@@ -48,7 +51,8 @@ class OptionContract(ABC):
 	def __init__(self,
 	             strike_price: float,
 	             maturity:Union[float, datetime],
-	             underlying_ticker: str = None):
+	             underlying_ticker: str = None,
+	             payoff_type: int = PayOffType.european):
 
 		self._strike_price = strike_price
 		self._maturity = maturity
@@ -57,6 +61,11 @@ class OptionContract(ABC):
 		self.valuation_model = None
 		self.type = None
 		self.theoretical_price = None
+		self.payoff_type = payoff_type
+
+
+
+	def _check_operation(self, other):
 
 	def __add__(self, other):
 		if isinstance(other, OptionContract):
@@ -112,9 +121,10 @@ class CallOption(OptionContract):
 	def __init__(self,
 	             strike_price: float,
 	             maturity:Union[float, datetime],
-	             underlying_ticker: str = None):
+	             underlying_ticker: str = None,
+	             payoff_type: int = PayOffType.european):
 
-		super().__init__(strike_price, maturity, underlying_ticker)
+		super().__init__(strike_price, maturity, underlying_ticker, payoff_type)
 		self.type = OptionTypes.call
 
 	def payoff(self, underlying_price):
@@ -125,8 +135,9 @@ class PutOption(OptionContract):
 	def __init__(self,
 	             strike_price: float,
 	             maturity:Union[float, datetime],
-	             underlying_ticker: str = None):
-		super().__init__(strike_price, maturity, underlying_ticker)
+	             underlying_ticker: str = None,
+	             payoff_type: int = PayOffType.european):
+		super().__init__(strike_price, maturity, underlying_ticker, payoff_type)
 		self.type = OptionTypes.put
 
 	def payoff(self, underlying_price):
@@ -154,9 +165,10 @@ class ExoticOption(OptionContract):
 	             payoff_function: Callable,
 	             maturity: Union[float, datetime],
 	             strike_price: float = None,
-	             underlying_ticker: str = None):
+	             underlying_ticker: str = None,
+	             payoff_type: int = PayOffType.european):
 
-		super().__init__(strike_price, maturity, underlying_ticker)
+		super().__init__(strike_price, maturity, underlying_ticker, payoff_type)
 		self.type = OptionTypes.exotic
 		self.payoff_function = payoff_function
 

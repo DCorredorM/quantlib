@@ -3,7 +3,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 
-from quantlib.options.options import OptionContract, OptionTypes
+from quantlib.options.options import OptionContract, OptionTypes, PayOffType
 from quantlib.data_handler.source import Data, RiskFreeRateScraper
 from quantlib.volatility import *
 from quantlib.utils.miscellaneous import to_date
@@ -174,7 +174,13 @@ class BinomialModel(nx.DiGraph, ValuationModel):
                     n["delta"] = (vu - vd) / (su - sd)
                     n["beta"] = (su * vd - sd * vu) / \
                                 (np.exp(self.risk_free_rate * self.maturity / self.number_of_steps) * (su - sd))
-                    n["value"] = n["price"] * n["delta"] + n["beta"]
+                    if self.option_contract.payoff_type == PayOffType.european:
+                        n["value"] = n["price"] * n["delta"] + n["beta"]
+                    elif self.option_contract.payoff_type == PayOffType.american:
+                        n["value"] = np.maximum(n["price"] * n["delta"] + n["beta"],
+                                                self.option_contract.payoff(n['price']))
+                    elif self.option_contract.payoff_type == PayOffType.asian:
+                        raise NotImplementedError("Don't know how to value asian options yet.")
             return n["value"]
 
         return value(self.root)
