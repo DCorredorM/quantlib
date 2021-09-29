@@ -66,24 +66,32 @@ class OptionContract(ABC):
 
 
 	def _check_operation(self, other):
+		pass_ = True
+		if isinstance(other, OptionContract):
+			if other.payoff_type == self.payoff_type:
+				if other.maturity == self.maturity:
+					return pass_
+				else:
+					raise Exception(f'Is not possible to operate contracts with different payoffs yet.')
+			else:
+				raise Exception(f'Is not possible to operate contracts with different payoff types.')
+
+		else:
+			raise Exception(f'Is not possible to subtract objects of type OptionContract and {type(other)}')
 
 	def __add__(self, other):
-		if isinstance(other, OptionContract):
+		if self._check_operation(other):
 			def payoff(x):
 				return self.payoff(x) + other.payoff(x)
 			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
 			return exotic
-		else:
-			raise Exception(f'Is not possible to sum objects of type OptionContract and {type(other)}')
 
 	def __sub__(self, other):
-		if isinstance(other, OptionContract):
+		if self._check_operation(other):
 			def payoff(x):
 				return self.payoff(x) - other.payoff(x)
 			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
 			return exotic
-		else:
-			raise Exception(f'Is not possible to subtract objects of type OptionContract and {type(other)}')
 
 	def __mul__(self, other):
 		if isinstance(other, float) or isinstance(other, int):
