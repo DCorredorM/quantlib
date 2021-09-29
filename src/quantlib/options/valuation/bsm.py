@@ -3,7 +3,7 @@ from quantlib.options import *
 from quantlib.volatility import *
 from quantlib.data_handler import *
 
-from utils.miscellaneous import to_date
+from quantlib.utils.miscellaneous import to_date
 
 from typing import Union
 import scipy.stats as sts
@@ -19,8 +19,6 @@ class BlackScholes(ValuationModel):
 	             valuation_date: datetime = None):
 
 		super().__init__(option_contract)
-		self.underlying_ticker = option_contract.underlying_ticker
-
 		# Valuation date
 		if valuation_date is None:
 			valuation_date = date.today()
@@ -61,23 +59,27 @@ class BlackScholes(ValuationModel):
 			raise Exception('The risk_free_rate needs to be one of float or RiskFreeRateScraper')
 
 	def value(self):
-		value = BlackScholes.bs_call(
-			underlying_price=self.underlying_price,
-			risk_free_rate=self.risk_free_rate(),
-			volatility=self.volatility_model(),
-			strike_price=self.option_contract.strike_price,
-			maturity=self.option_contract.maturity)
-		if self.option_contract.type == OptionTypes.call:
-			return value
-		elif self.option_contract.type == OptionTypes.put:
-			return BlackScholes.put_call_parity_call_to_put(call_price=value,
-			                                                strike_price=self.option_contract.strike_price,
-			                                                risk_free_rate=self.risk_free_rate(),
-			                                                underlying_price=self.underlying_price,
-			                                                maturity=self.option_contract.maturity)
-		else:
-			raise AttributeError(f'Black-Sholes can only value call and put european options. '
-			                     f'Use a binomial model to value your option.')
+		if self.option_contract.theoretical_price is None:
+			value, greeks = BlackScholes.bs_call(
+				underlying_price=self.underlying_price,
+				risk_free_rate=self.risk_free_rate(),
+				volatility=self.volatility_model(),
+				strike_price=self.option_contract.strike_price,
+				maturity=self.option_contract.maturity)
+			self.greeks = greeks
+			if self.option_contract.type == OptionTypes.call:
+				self.option_contract.theoretical_price = value
+			elif self.option_contract.type == OptionTypes.put:
+				self.option_contract.theoretical_price = \
+					BlackScholes.put_call_parity_call_to_put(call_price=value,
+					                                         strike_price=self.option_contract.strike_price,
+					                                         risk_free_rate=self.risk_free_rate(),
+					                                         underlying_price=self.underlying_price,
+					                                         maturity=self.option_contract.maturity)
+			else:
+				raise AttributeError(f'Black-Sholes can only value call and put european options. '
+				                     f'Use a binomial model to value your option.')
+		return self.option_contract.theoretical_price
 
 	@staticmethod
 	def bs_call(underlying_price: float,
@@ -103,7 +105,30 @@ class BlackScholes(ValuationModel):
 
 		d1 = (np.log(s_0 / K) + (r + sigma ** 2 / 2) * T) / (sigma * np.sqrt(T))
 		d2 = d1 - sigma * np.sqrt(T)
-		return s_0 * sts.norm.cdf(d1) - K * np.exp(-r * T) * sts.norm.cdf(d2)
+
+		# Compute the ITM probability
+		itm_probability = sts.norm.cdf(d2)
+
+		# Delta (dV / dS)
+		delta = sts.norm.cdf(d1)
+
+		# Compute the BS price
+		c = s_0 * delta - K * np.exp(-r * T) * itm_probability
+
+		# Gamma (dV^2 / dS^2)
+		gamma = 1 / (s_0 * sigma * np.sqrt(2 * np.pi * T)) * np.exp(- (d1 ** 2 / 2))
+
+		# Theta (dV / dT)
+		theta = - ((s_0 * sigma) / (2 * np.sqrt(2 * np.pi * T))) * np.exp(- (d1 ** 2 / 2)) \
+		        - r * K * np.exp(- r * T) * itm_probability
+
+		# Vega (dV / d sigma)
+		vega = (s_0 * np.sqrt(T) / np.sqrt(2 * np.pi)) * np.exp(- (d1 ** 2 / 2))
+
+		# Rho (dV / dr)
+		rho = T * K * np.exp(-r * T) * itm_probability
+
+		return c, Greeks(delta, gamma, theta, vega, rho, itm_probability)
 
 	@staticmethod
 	def put_call_parity_call_to_put(call_price,
@@ -152,3 +177,35 @@ class BlackScholes(ValuationModel):
 		"""
 
 		return put_price - strike_price * np.exp(-risk_free_rate * maturity) + spot_price
+
+
+class MonteCarloBlackScholes(ValuationModel):
+	# Todo: Implement it!
+	def value(self):
+		pass
+
+
+class Greeks:
+	# Todo: Improve the design of this class...
+	def __init__(self,
+	             delta,
+	             gamma,
+	             theta,
+	             vega,
+	             rho,
+	             itm_probability):
+		self.delta = delta
+		self.gamma = gamma
+		self.theta = theta
+		self.vega = vega
+		self.rho = rho
+		self.itm_probability = itm_probability
+
+		self.table = pd.DataFrame(
+			{'Greeks': ['Delta (dV / dS)', 'Gamma (dV^2 / dS^2)', 'Theta (dV / dT)',
+			            'Vega (dV / dsigma)', 'Rho (dV / dr)', 'ITM probability'],
+			 'Value': [self.delta, self.gamma, self.theta, self.vega, self.rho, self.itm_probability]})
+
+	def __repr__(self):
+		return self.table.to_markdown()
+

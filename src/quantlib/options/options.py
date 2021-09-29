@@ -26,18 +26,64 @@ class OptionContract(ABC):
 	type
 	theoretical_price
 	"""
+
+	@property
+	def maturity(self):
+		return self._maturity
+
+	@maturity.setter
+	def maturity(self, maturity):
+		self._maturity = maturity
+		self.theoretical_price = None
+
+	@property
+	def strike_price(self):
+		return self._strike_price
+
+	@strike_price.setter
+	def strike_price(self, strike_price):
+		self._strike_price = strike_price
+		self.theoretical_price = None
+
 	def __init__(self,
 	             strike_price: float,
-	             maturity: Union[int, datetime],
+	             maturity:Union[float, datetime],
 	             underlying_ticker: str = None):
 
-		self.strike_price = strike_price
-		self.maturity = maturity
+		self._strike_price = strike_price
+		self._maturity = maturity
 		self.underlying_ticker = underlying_ticker
 
 		self.valuation_model = None
 		self.type = None
 		self.theoretical_price = None
+
+	def __add__(self, other):
+		if isinstance(other, OptionContract):
+			def payoff(x):
+				return self.payoff(x) + other.payoff(x)
+			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
+			return exotic
+		else:
+			raise Exception(f'Is not possible to sum objects of type OptionContract and {type(other)}')
+
+	def __sub__(self, other):
+		if isinstance(other, OptionContract):
+			def payoff(x):
+				return self.payoff(x) - other.payoff(x)
+			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
+			return exotic
+		else:
+			raise Exception(f'Is not possible to subtract objects of type OptionContract and {type(other)}')
+
+	def __mul__(self, other):
+		if isinstance(other, float) or isinstance(other, int):
+			def payoff(x):
+				return self.payoff(x) * other
+			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
+			return exotic
+		else:
+			raise Exception(f'Is not possible to multiply objects of type OptionContract and {type(other)}')
 
 	@abstractmethod
 	def payoff(self, underlying_price):
@@ -65,7 +111,7 @@ class OptionContract(ABC):
 class CallOption(OptionContract):
 	def __init__(self,
 	             strike_price: float,
-	             maturity: int,
+	             maturity:Union[float, datetime],
 	             underlying_ticker: str = None):
 
 		super().__init__(strike_price, maturity, underlying_ticker)
@@ -78,9 +124,9 @@ class CallOption(OptionContract):
 class PutOption(OptionContract):
 	def __init__(self,
 	             strike_price: float,
-	             maturity: int,
+	             maturity:Union[float, datetime],
 	             underlying_ticker: str = None):
-		super(PutOption).__init__(strike_price, maturity, underlying_ticker)
+		super().__init__(strike_price, maturity, underlying_ticker)
 		self.type = OptionTypes.put
 
 	def payoff(self, underlying_price):
@@ -105,9 +151,9 @@ class ExoticOption(OptionContract):
 	payoff_function
 	"""
 	def __init__(self,
-	             strike_price: float,
-	             maturity: int,
 	             payoff_function: Callable,
+	             maturity: Union[float, datetime],
+	             strike_price: float = None,
 	             underlying_ticker: str = None):
 
 		super().__init__(strike_price, maturity, underlying_ticker)

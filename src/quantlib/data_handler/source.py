@@ -17,7 +17,7 @@ import inspect
 
 import yfinance as yf
 
-from utils.miscellaneous import *
+from quantlib.utils.miscellaneous import *
 from typing import Union, List
 
 from plotly import graph_objs as go
@@ -72,6 +72,38 @@ class Data:
 
 		# Visualizer
 		self.visualizer = DataVisualizer(self)
+
+	@classmethod
+	def from_data(cls, data, tickers):
+		obj = cls.__new__(cls)
+		if isinstance(tickers, list):
+			obj.tickers = tickers
+		elif isinstance(tickers, str):
+			obj.tickers = [tickers]
+			data = {tickers: data}
+		else:
+			raise AttributeError('The tickers need to be either a list or a string')
+
+		obj._raw_data = data
+		obj.raw_data = obj._raw_data
+
+		# Creates log returns dataframe
+		obj.log_returns = pd.DataFrame({k: obj.logarithmic_returns(obj._raw_data[k], 1) for k in obj.tickers},
+		                                columns=obj.tickers)
+		obj.expected_returns = obj.log_returns.mean(axis=0)
+		# Adds log returns to raw data dataframes:
+		for i in obj.tickers:
+			log_ret = obj.log_returns[i].rename('log_return')
+			obj._raw_data[i] = pd.concat([obj._raw_data[i], log_ret], axis=1)
+		# Covariance matrix
+		obj.covariance = obj.log_returns.cov()
+
+		# Additional indicators dictionary
+		obj.indicators = {}
+
+		# Visualizer
+		obj.visualizer = DataVisualizer(obj)
+		return obj
 
 	@property
 	def raw_data(self):

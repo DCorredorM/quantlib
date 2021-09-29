@@ -6,10 +6,10 @@ import numpy as np
 from quantlib.options.options import OptionContract, OptionTypes
 from quantlib.data_handler.source import Data, RiskFreeRateScraper
 from quantlib.volatility import *
-from utils.miscellaneous import to_date
+from quantlib.utils.miscellaneous import to_date
 
 from .valuation_abstract import ValuationModel
-from utils.miscellaneous import color_map
+from quantlib.utils.miscellaneous import color_map
 import pandas as pd
 from datetime import date
 
