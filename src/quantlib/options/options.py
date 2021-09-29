@@ -83,21 +83,21 @@ class OptionContract(ABC):
 		if self._check_operation(other):
 			def payoff(x):
 				return self.payoff(x) + other.payoff(x)
-			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
+			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity,payoff_type=self.payoff_type)
 			return exotic
 
 	def __sub__(self, other):
 		if self._check_operation(other):
 			def payoff(x):
 				return self.payoff(x) - other.payoff(x)
-			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
+			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity,payoff_type=self.payoff_type)
 			return exotic
 
 	def __mul__(self, other):
 		if isinstance(other, float) or isinstance(other, int):
 			def payoff(x):
 				return self.payoff(x) * other
-			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity)
+			exotic = ExoticOption(payoff_function=payoff, maturity=self.maturity,payoff_type=self.payoff_type)
 			return exotic
 		else:
 			raise Exception(f'Is not possible to multiply objects of type OptionContract and {type(other)}')
