@@ -95,8 +95,27 @@ class TestBinomialModels(unittest.TestCase):
 
 		model.visualizer.sub_value_tree((0, 0), 10)
 
+	def test_americans(self):
+		volatility = 0.5513031
+		risk_free_rate = 0.2296 / 100
+		underlying_price = 173.56837
+		maturity = (63 + 252) / 252
+		delta = 1 / 252
+		number_of_steps = 63 + 252
+		u = np.exp(volatility * np.sqrt(delta))
+		d = np.exp(-volatility * np.sqrt(delta))
+		call = CallOption(strike_price=100, maturity=maturity, payoff_type=PayOffType.american)
+
+		bt = BinomialModel(option_contract=call,
+		                   underlying_price=underlying_price,
+		                   up_factor=u,
+		                   down_factor=d,
+		                   number_of_steps=number_of_steps,
+		                   risk_free_rate=risk_free_rate)
+		bt.value()
+
 
 if __name__ == '__main__':
 	# unittest.main()
 	t = TestBinomialModels()
-	t.test_from_data()
+	t.test_americans()
