@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Callable, Union, List
+from typing import Callable, Union, List, Dict, Tuple
 
 from datetime import datetime
 
@@ -98,7 +98,7 @@ class OptionContract(ABC):
             coefficients = [1, 1]
 
             return ComboStrategy(contracts, coefficients)
-        elif isinstance(other, int):
+        else:
             return self
 
     def __sub__(self, other):
@@ -297,6 +297,39 @@ class ComboStrategy(OptionContract):
         return payoff_type, underlying_ticker
 
 
+class DiagonalComboStrategy(OptionContract):
+    def __init__(self, contracts: List[OptionContract], coefficients: List[Union[int, float]]):
+        payoff_type, underlying_ticker = ComboStrategy.check_combo(contracts=contracts)
+        # For each maturity we create a ComboStrategy object
+        self.contracts: Dict[Union[int, datetime], ComboStrategy] = dict()
+
+        for coefficient, contract in zip(coefficients, contracts):
+            if contract.maturity in self.contracts:
+                self.contracts[contract.maturity] += coefficient * contract
+                
+            else:
+                self.contracts[contract.maturity] = coefficient * contract
+         
+        super(DiagonalComboStrategy, self).__init__(
+            strike_price=[c.strike_price for c in contracts],
+            maturity=[c.maturity for c in contracts],
+            underlying_ticker=underlying_ticker,
+            payoff_type=payoff_type
+        )
+
+    def payoff(self, underlying_price: Union[Dict[Union[int, datetime], float], List[float]]):
+        if isinstance(underlying_price, Dict):
+            return sum(
+                self.contracts[maturity].payoff(price) for maturity, price in underlying_price.items()
+            )
+        else:
+            contracts = list(self.contracts.values())
+            return sum(contracts[i].payoff(price) for i, price in enumerate(underlying_price))
+    
+    def __add__(self, other):
+        pass
+
+
 class OptionContractVisualizer:
     def __init__(self, option_contract: OptionContract):
         self.option_contract = option_contract
@@ -304,14 +337,23 @@ class OptionContractVisualizer:
         if isinstance(self.option_contract, ComboStrategy):
             self.x_low = min([c.strike_price for c in self.option_contract.contracts]) * 0.95
             self.x_high = max([c.strike_price for c in self.option_contract.contracts]) * 1.05
+        elif isinstance(self.option_contract, DiagonalComboStrategy):
+            self.x_low = min(self.option_contract.strike_price) * 0.95
+            self.x_high = max(self.option_contract.strike_price) * 1.05
         else:
             self.x_low = self.option_contract.strike_price * 0.95
             self.x_high = self.option_contract.strike_price * 1.05
 
-    def payoff(self):
-        fig, ax = plt.subplots(figsize=(12, 8))
-        prices = np.linspace(self.x_low, self.x_high, 500)
-        y = self.option_contract.payoff(prices)
-        ax.plot(prices, y)
+    def payoff(self, value=None, ax=None, **kwargs):
+        if ax is None:
+            fig, ax = plt.subplots(figsize=kwargs.pop("figsize", (10, 7)))
+        prices = np.linspace(kwargs.pop("x_low", self.x_low), kwargs.pop("x_high",self.x_high), 500)
+        
+        if value is None:
+            y = self.option_contract.payoff(prices)
+        else:
+            y = self.option_contract.payoff(prices) - value
+        ax.plot(prices, y, **kwargs)
         plt.xlabel('Price')
         plt.ylabel('Value')
+        return ax
